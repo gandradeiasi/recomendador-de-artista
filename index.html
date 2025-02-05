@@ -4,6 +4,22 @@
     <title>Recomendador de Artistas</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #login {
+            display: block;
+            margin: 50px auto;
+            padding: 15px 30px;
+            background-color: #1DB954;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+        }
         .container {
             display: flex;
             flex-wrap: wrap;
@@ -20,16 +36,33 @@
             text-decoration: none;
             color: inherit;
             box-sizing: border-box;
+            transition: transform 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
         }
         .card img {
             width: 100%;
-            height: auto;
+            height: 200px;
+            object-fit: cover;
             border-radius: 4px;
             margin-bottom: 12px;
         }
         #progressContainer {
             text-align: center;
             padding: 20px;
+        }
+        .status-message {
+            text-align: center;
+            margin: 20px 0;
+            font-style: italic;
+            color: #666;
+        }
+        .title {
+            text-align: center;
+            width: 100%;
+            margin: 30px 0;
+            font-size: 24px;
         }
         @media (max-width: 480px) {
             .card {
@@ -42,14 +75,20 @@
 <body>
     <button id="login">Login com Spotify</button>
     <div id="progressContainer" style="display: none;">
-        <div>Carregando músicas...</div>
+        <div>Carregando suas músicas salvas...</div>
         <progress id="progress" value="0" max="1"></progress>
     </div>
+    <div id="status"></div>
     <div class="container" id="results"></div>
 
     <script>
         const clientId = 'cdbe0b644b984a6e98839e352d87bb3d';
         const redirectUri = 'https://gandradeiasi.github.io/recomendador-de-artista/';
+
+        // Esconder botão de login se já estiver autenticado
+        if(window.location.hash.includes('access_token')) {
+            document.getElementById('login').style.display = 'none';
+        }
 
         document.getElementById('login').addEventListener('click', () => {
             const scope = 'user-library-read';
@@ -61,11 +100,12 @@
             try {
                 const accessToken = window.location.hash.split('&')[0].split('=')[1];
                 
+                // Atualizar status
+                showStatus('Buscando suas músicas salvas...');
                 const savedTracks = await getAllSavedTracks(accessToken);
-                console.log('Músicas salvas:', savedTracks);
                 
+                showStatus('Analisando seus gêneros musicais...');
                 const artistDetails = await getArtistGenres(accessToken, savedTracks);
-                console.log('Detalhes dos artistas:', artistDetails);
                 
                 const genreCounts = processGenres(savedTracks, artistDetails);
                 console.log('Contagem de gêneros:', genreCounts);
@@ -73,13 +113,20 @@
                 const elbowGenres = findElbowGenres(genreCounts);
                 console.log('Gêneros do cotovelo:', elbowGenres);
                 
+                showStatus('Encontrando recomendações personalizadas...');
                 const recommendations = await getRecommendations(accessToken, elbowGenres, savedTracks);
-                console.log('Recomendações:', recommendations);
                 
                 displayResults(recommendations);
             } catch (error) {
                 console.error('Erro no processo principal:', error);
+                showStatus(`Erro: ${error.message}`);
             }
+        }
+
+        function showStatus(message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = message;
+            statusDiv.className = 'status-message';
         }
 
         async function getAllSavedTracks(accessToken) {
@@ -144,17 +191,54 @@
         function findElbowGenres(sortedGenres) {
             if(sortedGenres.length < 3) return sortedGenres;
             
-            const diffs = [];
-            for(let i = 1; i < sortedGenres.length; i++) {
-                diffs.push(sortedGenres[i][1] - sortedGenres[i-1][1]);
+            // Implementação correta do método do cotovelo
+            const points = sortedGenres.map(([_, y]) => y);
+            const n = points.length;
+            
+            // Coordenadas do primeiro e último ponto
+            const firstPoint = [0, points[0]];
+            const lastPoint = [n-1, points[n-1]];
+            
+            // Calcular distância de todos os pontos para a linha
+            let maxDistance = -Infinity;
+            let elbowIndex = -1;
+            
+            for(let i = 1; i < n-1; i++) {
+                const distance = perpendicularDistance(
+                    [i, points[i]],
+                    firstPoint,
+                    lastPoint
+                );
+                
+                if(distance > maxDistance) {
+                    maxDistance = distance;
+                    elbowIndex = i;
+                }
             }
             
-            const elbowIndex = diffs.indexOf(Math.max(...diffs)) + 1;
+            // Retorna o cotovelo e seus vizinhos
             return [
                 sortedGenres[elbowIndex - 1],
                 sortedGenres[elbowIndex],
                 sortedGenres[elbowIndex + 1]
             ].filter(Boolean);
+        }
+
+        function perpendicularDistance(point, lineStart, lineEnd) {
+            // Fórmula da distância perpendicular
+            const [x0, y0] = point;
+            const [x1, y1] = lineStart;
+            const [x2, y2] = lineEnd;
+            
+            const numerator = Math.abs(
+                (y2 - y1)*x0 - (x2 - x1)*y0 + x2*y1 - y2*x1
+            );
+            
+            const denominator = Math.sqrt(
+                (y2 - y1)**2 + (x2 - x1)**2
+            );
+            
+            return numerator / denominator;
         }
 
         async function getRecommendations(accessToken, genres, savedTracks) {
@@ -169,11 +253,10 @@
             
             for(const genre of genres) {
                 let offset = 0;
-                let found = false;
                 let validArtists = [];
                 
                 // Paginação até encontrar artistas válidos
-                while(offset < 1000 && !found) {
+                while(offset < 1000 && validArtists.length === 0) {
                     const searchUrl = `https://api.spotify.com/v1/search?q=genre:${encodeURIComponent(genre[0])}&type=artist&limit=50&offset=${offset}`;
                     const response = await fetch(searchUrl, {
                         headers: {'Authorization': `Bearer ${accessToken}`}
@@ -185,11 +268,7 @@
                         !savedArtists.has(artist.id)
                     );
                     
-                    if(validArtists.length > 0) {
-                        found = true;
-                    } else {
-                        offset += 50;
-                    }
+                    offset += 50;
                 }
                 
                 if(validArtists.length > 0) {
@@ -203,7 +282,7 @@
 
         function displayResults(artists) {
             const container = document.getElementById('results');
-            container.innerHTML = '';
+            container.innerHTML = '<h2 class="title">Artistas que achamos que você vai gostar...</h2>';
             
             artists.forEach(artist => {
                 const card = document.createElement('a');
@@ -212,7 +291,7 @@
                 card.target = '_blank';
                 
                 card.innerHTML = `
-                    <img src="${artist.images[0]?.url || ''}" alt="${artist.name}">
+                    <img src="${artist.images[0]?.url || 'https://via.placeholder.com/300'}" alt="${artist.name}">
                     <h3>${artist.name}</h3>
                     <p>${artist.genres.slice(0, 3).join(', ')}</p>
                 `;
