@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Recomendador de Artistas</title>
     <style>
@@ -13,11 +14,13 @@
             text-decoration: none;
             color: inherit;
         }
+
         .card img {
             width: 100%;
             height: auto;
             border-radius: 4px;
         }
+
         #progress {
             width: 100%;
             height: 20px;
@@ -25,6 +28,7 @@
         }
     </style>
 </head>
+
 <body>
     <button id="login">Login com Spotify</button>
     <div id="progressContainer" style="display: none;">
@@ -47,18 +51,16 @@
         // Função principal após o login
         async function main() {
             const accessToken = window.location.hash.split('&')[0].split('=')[1];
-            
-            // Buscar todas músicas salvas
+
             const savedTracks = await getAllSavedTracks(accessToken);
-            
-            // Processar gêneros
-            const genreCounts = processGenres(savedTracks);
+
+            // Buscar detalhes dos artistas
+            const artistDetails = await getArtistGenres(accessToken, savedTracks);
+
+            const genreCounts = processGenres(savedTracks, artistDetails);
             const elbowGenres = findElbowGenres(genreCounts);
-            
-            // Buscar recomendações
+
             const recommendations = await getRecommendations(accessToken, elbowGenres, savedTracks);
-            
-            // Exibir resultados
             displayResults(recommendations);
         }
 
@@ -66,31 +68,57 @@
             document.getElementById('progressContainer').style.display = 'block';
             let tracks = [];
             let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
-            
-            while(url) {
+
+            while (url) {
                 const response = await fetch(url, {
-                    headers: {'Authorization': `Bearer ${accessToken}`}
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
                 });
                 const data = await response.json();
                 tracks.push(...data.items);
                 document.getElementById('progress').value = tracks.length / data.total;
                 url = data.next;
             }
-            
+
             return tracks;
         }
 
-        function processGenres(tracks) {
+        async function getArtistGenres(accessToken, tracks) {
+            const artistIds = [...new Set(
+                tracks.flatMap(track =>
+                    track.track.artists.map(artist => artist.id)
+                )
+            )];
+
+            const artistDetails = {};
+            const batchSize = 50;
+
+            for (let i = 0; i < artistIds.length; i += batchSize) {
+                const batch = artistIds.slice(i, i + batchSize);
+                const response = await fetch(`https://api.spotify.com/v1/artists?ids=${batch.join(',')}`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const data = await response.json();
+
+                data.artists.forEach(artist => {
+                    artistDetails[artist.id] = artist.genres || [];
+                });
+            }
+
+            return artistDetails;
+        }
+
+        function processGenres(tracks, artistDetails) {
             const genreMap = {};
-            
+
             tracks.forEach(track => {
                 track.track.artists.forEach(artist => {
-                    artist.genres.forEach(genre => {
+                    const genres = artistDetails[artist.id] || [];
+                    genres.forEach(genre => {
                         genreMap[genre] = (genreMap[genre] || 0) + 1;
                     });
                 });
             });
-            
+
             return Object.entries(genreMap)
                 .sort((a, b) => a[1] - b[1]);
         }
@@ -98,10 +126,10 @@
         function findElbowGenres(sortedGenres) {
             // Implementação simplificada do método do cotovelo
             const diffs = [];
-            for(let i = 1; i < sortedGenres.length; i++) {
-                diffs.push(sortedGenres[i][1] - sortedGenres[i-1][1]);
+            for (let i = 1; i < sortedGenres.length; i++) {
+                diffs.push(sortedGenres[i][1] - sortedGenres[i - 1][1]);
             }
-            
+
             const elbowIndex = diffs.indexOf(Math.max(...diffs)) + 1;
             return [
                 sortedGenres[elbowIndex - 1],
@@ -119,52 +147,53 @@
             });
 
             const recommendations = [];
-            
-            for(const genre of genres) {
+
+            for (const genre of genres) {
                 const searchUrl = `https://api.spotify.com/v1/search?q=genre:${encodeURIComponent(genre[0])}&type=artist&limit=50`;
                 const response = await fetch(searchUrl, {
-                    headers: {'Authorization': `Bearer ${accessToken}`}
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
                 });
                 const data = await response.json();
-                
-                const validArtists = data.artists.items.filter(artist => 
-                    artist.genres.includes(genre[0]) && 
+
+                const validArtists = data.artists.items.filter(artist =>
+                    artist.genres.includes(genre[0]) &&
                     !savedArtists.has(artist.id)
                 );
-                
-                if(validArtists.length > 0) {
+
+                if (validArtists.length > 0) {
                     const randomArtist = validArtists[Math.floor(Math.random() * validArtists.length)];
                     recommendations.push(randomArtist);
                 }
             }
-            
+
             return recommendations;
         }
 
         function displayResults(artists) {
             const container = document.getElementById('results');
             container.innerHTML = '';
-            
+
             artists.forEach(artist => {
                 const card = document.createElement('a');
                 card.className = 'card';
                 card.href = artist.external_urls.spotify;
                 card.target = '_blank';
-                
+
                 card.innerHTML = `
                     <img src="${artist.images[0]?.url || ''}" alt="${artist.name}">
                     <h3>${artist.name}</h3>
                     <p>${artist.genres.join(', ')}</p>
                 `;
-                
+
                 container.appendChild(card);
             });
         }
 
         // Iniciar o processo se o token estiver presente
-        if(window.location.hash.includes('access_token')) {
+        if (window.location.hash.includes('access_token')) {
             main();
         }
     </script>
 </body>
+
 </html>
