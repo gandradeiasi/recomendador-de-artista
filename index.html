@@ -262,8 +262,9 @@
             // Gerar lista ordenada por proximidade ao cotovelo
             const orderedGenres = [];
             let offset = 0;
-            
-            while(orderedGenres.length < sortedGenres.length) {
+            orderedMax = 15;
+
+            while(orderedGenres.length != orderedMax) {
                 const indexes = [];
                 
                 if(elbowIndex - offset >= 0) indexes.push(elbowIndex - offset);
@@ -277,7 +278,7 @@
                 offset++;
             }
             
-            return orderedGenres.slice(0, 15); // Limite máximo para fallback
+            return orderedGenres; // Limite máximo para fallback
         }
 
         // Calcular índice do cotovelo
