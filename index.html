@@ -33,9 +33,24 @@
             cursor: pointer;
             position: relative;
             border: 2px solid #1DB954;
+            width: 100%;
+            min-height: 80px;
+            margin: 2rem 0;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            text-decoration: none;
+            color: inherit;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
         }
 
         .recommendation-button:hover {
+            transform: translateY(-2px);
             box-shadow: 0 4px 15px rgba(29, 185, 84, 0.2);
         }
 
@@ -66,6 +81,10 @@
         .artist-name {
             color: #1DB954;
             text-decoration: underline;
+            margin: 0 0 0.5rem 0;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #333;
         }
 
         .artist-genres {
@@ -255,7 +274,7 @@
                     }
                 });
                 
-                offset++;
+                offset--;
             }
             
             return orderedGenres.slice(0, 15); // Limite máximo para fallback
