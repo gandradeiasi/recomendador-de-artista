@@ -144,8 +144,23 @@
         // Fluxo principal
         async function main() {
             try {
-                // ... (código anterior mantido)
-                
+                const accessToken = window.location.hash.split('&')[0].split('=')[1];
+
+                // Buscar músicas salvas
+                showStatus('Buscando suas músicas salvas...');
+                const savedTracks = await getAllSavedTracks(accessToken);
+                console.log('Músicas encontradas:', savedTracks.length);
+
+                // Buscar gêneros dos artistas
+                showStatus('Analisando seus artistas...');
+                const artistDetails = await getArtistGenres(accessToken, savedTracks);
+                console.log('Artistas únicos:', Object.keys(artistDetails).length);
+
+                // Processar gêneros
+                const genreCounts = processGenres(savedTracks, artistDetails);
+                console.log('Distribuição de gêneros:', genreCounts);
+
+                // Encontrar gêneros do cotovelo
                 const orderedGenres = findElbowGenres(genreCounts);
                 console.log('Gêneros ordenados:', orderedGenres);
                 
