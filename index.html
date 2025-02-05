@@ -82,9 +82,13 @@
 
         .artist-genres span {
             background-color: #e0e0e0;
+            /* Todos os gêneros em cinza */
             padding: 0.2rem 0.5rem;
             border-radius: 12px;
             font-size: 0.8rem;
+            margin: 2px;
+            white-space: normal;
+            /* Quebra de linha */
         }
 
         #progressContainer {
@@ -295,60 +299,44 @@
 
             const recommendations = [];
             const usedArtists = new Set();
-            const targetGenres = genres.map(g => g[0]); // Lista de gêneros alvo
 
-            // Primeira fase: busca rigorosa
-            for (const genre of genres) {
+            // Busca um artista por gênero específico
+            for (const genreData of genres.slice(0, 3)) { // Limita a 3 gêneros
+                const targetGenre = genreData[0];
                 let offset = 0;
                 let found = false;
 
+                console.log(`Buscando artistas para gênero: ${targetGenre}`);
+
                 while (offset < 1000 && !found) {
                     const response = await fetch(
-                        `https://api.spotify.com/v1/search?q=genre:${encodeURIComponent(genre[0])}&type=artist&limit=50&offset=${offset}`,
+                        `https://api.spotify.com/v1/search?q=genre:${encodeURIComponent(targetGenre)}&type=artist&limit=50&offset=${offset}`,
                         { headers: { 'Authorization': `Bearer ${accessToken}` } }
                     );
                     const data = await response.json();
 
                     const validArtists = data.artists.items.filter(artist =>
-                        artist.genres.some(g => targetGenres.includes(g)) && // Verifica qualquer gênero alvo
+                        artist.genres.includes(targetGenre) && // Exige o gênero exato
                         !savedArtists.has(artist.id) &&
                         !usedArtists.has(artist.id)
                     );
 
                     if (validArtists.length > 0) {
                         const randomArtist = validArtists[Math.floor(Math.random() * validArtists.length)];
-                        recommendations.push(randomArtist);
+                        recommendations.push({
+                            ...randomArtist,
+                            matchedGenre: targetGenre // Armazena o gênero alvo
+                        });
                         usedArtists.add(randomArtist.id);
                         found = true;
+                        console.log(`Encontrado: ${randomArtist.name} para ${targetGenre}`);
                     }
 
                     offset += 50;
                 }
 
-                if (recommendations.length >= 3) break;
-            }
-
-            // Segunda fase: fallback dentro dos mesmos gêneros
-            if (recommendations.length < 3) {
-                for (const genre of genres) {
-                    const response = await fetch(
-                        `https://api.spotify.com/v1/search?q=genre:${encodeURIComponent(genre[0])}&type=artist&limit=50`,
-                        { headers: { 'Authorization': `Bearer ${accessToken}` } }
-                    );
-                    const data = await response.json();
-
-                    const validArtists = data.artists.items.filter(artist =>
-                        !savedArtists.has(artist.id) &&
-                        !usedArtists.has(artist.id)
-                    );
-
-                    if (validArtists.length > 0) {
-                        const randomArtist = validArtists[Math.floor(Math.random() * validArtists.length)];
-                        recommendations.push(randomArtist);
-                        usedArtists.add(randomArtist.id);
-                    }
-
-                    if (recommendations.length >= 3) break;
+                if (!found) {
+                    console.error(`Nenhum artista encontrado para ${targetGenre}`);
                 }
             }
 
@@ -359,18 +347,22 @@
         function displayResults(artists) {
             const container = document.getElementById('results');
             container.innerHTML = '<div class="title">Artistas Recomendados</div>';
-            
+
             artists.forEach(artist => {
                 const button = document.createElement('a');
                 button.className = 'recommendation-button';
                 button.href = artist.external_urls.spotify;
                 button.target = '_blank';
-                
-                // Destacar gêneros correspondentes
-                const genresHTML = (artist.genres || []).map(genre => {
-                    const isMatch = selectedGenres.includes(genre);
-                    return `<span class="${isMatch ? 'genre-match' : ''}">${genre}</span>`;
-                }).join('');
+
+                // Garante que o gênero alvo está presente
+                const forcedGenres = [
+                    artist.matchedGenre,
+                    ...(artist.genres || []).filter(g => g !== artist.matchedGenre)
+                ].slice(0, 3);
+
+                const genresHTML = forcedGenres
+                    .map(genre => `<span>${genre}</span>`)
+                    .join('');
 
                 button.innerHTML = `
                     <img class="artist-image" src="${artist.images[0]?.url || 'https://via.placeholder.com/150'}" alt="${artist.name}">
@@ -379,7 +371,7 @@
                         <div class="artist-genres">${genresHTML}</div>
                     </div>
                 `;
-                
+
                 container.appendChild(button);
             });
         }
