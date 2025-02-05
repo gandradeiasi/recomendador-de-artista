@@ -1,10 +1,170 @@
 <!DOCTYPE html>
-<html lang="pt-br">
-  <head>
-    <title>Título da página</title>
-    <meta charset="utf-8">
-  </head>
-  <body>
-    Aqui vai o código HTML que fará seu site aparecer.
-  </body>
+<html>
+<head>
+    <title>Recomendador de Artistas</title>
+    <style>
+        .card {
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px;
+            width: 200px;
+            display: inline-block;
+            text-decoration: none;
+            color: inherit;
+        }
+        .card img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+        #progress {
+            width: 100%;
+            height: 20px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <button id="login">Login com Spotify</button>
+    <div id="progressContainer" style="display: none;">
+        <div>Carregando músicas...</div>
+        <progress id="progress" value="0" max="1"></progress>
+    </div>
+    <div id="results"></div>
+
+    <script>
+        const clientId = 'cdbe0b644b984a6e98839e352d87bb3d';
+        const redirectUri = 'https://gandradeiasi.github.io/recomendador-de-artista/';
+
+        // Função para inicializar o login
+        document.getElementById('login').addEventListener('click', () => {
+            const scope = 'user-library-read';
+            const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=token`;
+            window.location = authUrl;
+        });
+
+        // Função principal após o login
+        async function main() {
+            const accessToken = window.location.hash.split('&')[0].split('=')[1];
+            
+            // Buscar todas músicas salvas
+            const savedTracks = await getAllSavedTracks(accessToken);
+            
+            // Processar gêneros
+            const genreCounts = processGenres(savedTracks);
+            const elbowGenres = findElbowGenres(genreCounts);
+            
+            // Buscar recomendações
+            const recommendations = await getRecommendations(accessToken, elbowGenres, savedTracks);
+            
+            // Exibir resultados
+            displayResults(recommendations);
+        }
+
+        async function getAllSavedTracks(accessToken) {
+            document.getElementById('progressContainer').style.display = 'block';
+            let tracks = [];
+            let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
+            
+            while(url) {
+                const response = await fetch(url, {
+                    headers: {'Authorization': `Bearer ${accessToken}`}
+                });
+                const data = await response.json();
+                tracks.push(...data.items);
+                document.getElementById('progress').value = tracks.length / data.total;
+                url = data.next;
+            }
+            
+            return tracks;
+        }
+
+        function processGenres(tracks) {
+            const genreMap = {};
+            
+            tracks.forEach(track => {
+                track.track.artists.forEach(artist => {
+                    artist.genres.forEach(genre => {
+                        genreMap[genre] = (genreMap[genre] || 0) + 1;
+                    });
+                });
+            });
+            
+            return Object.entries(genreMap)
+                .sort((a, b) => a[1] - b[1]);
+        }
+
+        function findElbowGenres(sortedGenres) {
+            // Implementação simplificada do método do cotovelo
+            const diffs = [];
+            for(let i = 1; i < sortedGenres.length; i++) {
+                diffs.push(sortedGenres[i][1] - sortedGenres[i-1][1]);
+            }
+            
+            const elbowIndex = diffs.indexOf(Math.max(...diffs)) + 1;
+            return [
+                sortedGenres[elbowIndex - 1],
+                sortedGenres[elbowIndex],
+                sortedGenres[elbowIndex + 1]
+            ].filter(Boolean);
+        }
+
+        async function getRecommendations(accessToken, genres, savedTracks) {
+            const savedArtists = new Set();
+            savedTracks.forEach(track => {
+                track.track.artists.forEach(artist => {
+                    savedArtists.add(artist.id);
+                });
+            });
+
+            const recommendations = [];
+            
+            for(const genre of genres) {
+                const searchUrl = `https://api.spotify.com/v1/search?q=genre:${encodeURIComponent(genre[0])}&type=artist&limit=50`;
+                const response = await fetch(searchUrl, {
+                    headers: {'Authorization': `Bearer ${accessToken}`}
+                });
+                const data = await response.json();
+                
+                const validArtists = data.artists.items.filter(artist => 
+                    artist.genres.includes(genre[0]) && 
+                    !savedArtists.has(artist.id)
+                );
+                
+                if(validArtists.length > 0) {
+                    const randomArtist = validArtists[Math.floor(Math.random() * validArtists.length)];
+                    recommendations.push(randomArtist);
+                }
+            }
+            
+            return recommendations;
+        }
+
+        function displayResults(artists) {
+            const container = document.getElementById('results');
+            container.innerHTML = '';
+            
+            artists.forEach(artist => {
+                const card = document.createElement('a');
+                card.className = 'card';
+                card.href = artist.external_urls.spotify;
+                card.target = '_blank';
+                
+                card.innerHTML = `
+                    <img src="${artist.images[0]?.url || ''}" alt="${artist.name}">
+                    <h3>${artist.name}</h3>
+                    <p>${artist.genres.join(', ')}</p>
+                `;
+                
+                container.appendChild(card);
+            });
+        }
+
+        // Iniciar o processo se o token estiver presente
+        if(window.location.hash.includes('access_token')) {
+            main();
+        }
+    </script>
+</body>
 </html>
