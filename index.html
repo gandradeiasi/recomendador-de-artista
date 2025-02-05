@@ -29,7 +29,7 @@
         }
 
         .recommendation-button {
-            width: calc(100% - 4rem);
+            width: 100%;
             min-height: 80px;
             margin: 2rem 0;
             padding: 1rem;
@@ -91,6 +91,13 @@
             color: #444;
             font-size: 1rem;
         }
+
+        .title {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #1DB954;
+            font-size: 1.5rem;
+        }
     </style>
 </head>
 <body>
@@ -106,47 +113,60 @@
         const clientId = 'cdbe0b644b984a6e98839e352d87bb3d';
         const redirectUri = 'https://gandradeiasi.github.io/recomendador-de-artista/';
 
+        // Controle de autenticação
         if(window.location.hash.includes('access_token')) {
             document.getElementById('login').style.display = 'none';
             document.getElementById('progressContainer').style.display = 'block';
         }
 
+        // Evento de login
         document.getElementById('login').addEventListener('click', () => {
             const scope = 'user-library-read';
             const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=token`;
             window.location = authUrl;
         });
 
+        // Fluxo principal
         async function main() {
             try {
                 const accessToken = window.location.hash.split('&')[0].split('=')[1];
                 
+                // Buscar músicas salvas
                 showStatus('Buscando suas músicas salvas...');
                 const savedTracks = await getAllSavedTracks(accessToken);
                 console.log('Músicas encontradas:', savedTracks.length);
                 
+                // Buscar gêneros dos artistas
                 showStatus('Analisando seus artistas...');
                 const artistDetails = await getArtistGenres(accessToken, savedTracks);
                 console.log('Artistas únicos:', Object.keys(artistDetails).length);
                 
+                // Processar gêneros
                 const genreCounts = processGenres(savedTracks, artistDetails);
                 console.log('Distribuição de gêneros:', genreCounts);
                 
+                // Encontrar gêneros do cotovelo
                 const elbowGenres = findElbowGenres(genreCounts);
                 console.log('Gêneros selecionados:', elbowGenres);
                 
+                // Buscar recomendações
                 showStatus('Buscando recomendações...');
-                const recommendations = await getRecommendations(accessToken, elbowGenres, savedTracks);
-                console.log('Recomendações encontradas:', recommendations.length, recommendations);
+                let recommendations = await getRecommendations(accessToken, elbowGenres, savedTracks);
                 
-                // Garantir pelo menos 3 recomendações
+                // Garantir 3 recomendações
                 if(recommendations.length < 3) {
-                    console.log('Buscando recomendações adicionais...');
-                    const additionalGenres = genreCounts.slice(-3).reverse();
-                    const extraRecs = await getRecommendations(accessToken, additionalGenres, savedTracks);
-                    recommendations.push(...extraRecs.filter(r => !recommendations.includes(r)));
+                    const backupGenres = genreCounts
+                        .filter(g => !elbowGenres.includes(g))
+                        .slice(-3)
+                        .reverse();
+                    
+                    const backupRecs = await getRecommendations(accessToken, backupGenres, savedTracks);
+                    recommendations = [...recommendations, ...backupRecs]
+                        .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+                        .slice(0, 3);
                 }
                 
+                // Exibir resultados
                 displayResults(recommendations.slice(0, 3));
             } catch (error) {
                 console.error('Erro:', error);
@@ -154,10 +174,108 @@
             }
         }
 
-        // Funções auxiliares mantidas com ajustes
+        // Função para buscar todas as músicas salvas
+        async function getAllSavedTracks(accessToken) {
+            let tracks = [];
+            let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
+            
+            while(url) {
+                const response = await fetch(url, {
+                    headers: {'Authorization': `Bearer ${accessToken}`}
+                });
+                const data = await response.json();
+                tracks.push(...data.items);
+                document.getElementById('progress').value = tracks.length / data.total;
+                url = data.next;
+            }
+            return tracks;
+        }
+
+        // Buscar gêneros dos artistas
+        async function getArtistGenres(accessToken, tracks) {
+            const artistIds = [...new Set(
+                tracks.flatMap(track => track.track.artists.map(artist => artist.id))
+            )];
+            
+            const artistDetails = {};
+            for(let i = 0; i < artistIds.length; i += 50) {
+                const batch = artistIds.slice(i, i + 50);
+                const response = await fetch(`https://api.spotify.com/v1/artists?ids=${batch.join(',')}`, {
+                    headers: {'Authorization': `Bearer ${accessToken}`}
+                });
+                const data = await response.json();
+                data.artists.forEach(artist => {
+                    artistDetails[artist.id] = artist.genres || [];
+                });
+            }
+            return artistDetails;
+        }
+
+        // Processar contagem de gêneros
+        function processGenres(tracks, artistDetails) {
+            const genreMap = {};
+            tracks.forEach(track => {
+                track.track.artists.forEach(artist => {
+                    (artistDetails[artist.id] || []).forEach(genre => {
+                        genreMap[genre] = (genreMap[genre] || 0) + 1;
+                    });
+                });
+            });
+            return Object.entries(genreMap).sort((a, b) => a[1] - b[1]);
+        }
+
+        // Encontrar gêneros do cotovelo
+        function findElbowGenres(sortedGenres) {
+            if(sortedGenres.length <= 3) return sortedGenres;
+            
+            const points = sortedGenres.map(([_, count]) => count);
+            const elbowIndex = calculateElbowIndex(points);
+            
+            let padding = 1;
+            let selectedGenres = [];
+            while(selectedGenres.length < 3 && padding < 5) {
+                const start = Math.max(0, elbowIndex - padding);
+                const end = Math.min(sortedGenres.length - 1, elbowIndex + padding);
+                selectedGenres = [...new Set([...sortedGenres.slice(start, end + 1)])];
+                padding++;
+            }
+            return selectedGenres.slice(0, 3);
+        }
+
+        // Calcular índice do cotovelo
+        function calculateElbowIndex(points) {
+            const n = points.length;
+            const firstPoint = [0, points[0]];
+            const lastPoint = [n-1, points[n-1]];
+            let maxDistance = -Infinity;
+            let elbowIndex = 0;
+            
+            for(let i = 1; i < n-1; i++) {
+                const distance = perpendicularDistance([i, points[i]], firstPoint, lastPoint);
+                if(distance > maxDistance) {
+                    maxDistance = distance;
+                    elbowIndex = i;
+                }
+            }
+            return elbowIndex;
+        }
+
+        // Cálculo da distância perpendicular
+        function perpendicularDistance(point, lineStart, lineEnd) {
+            const [x0, y0] = point;
+            const [x1, y1] = lineStart;
+            const [x2, y2] = lineEnd;
+            
+            const numerator = Math.abs((y2 - y1)*x0 - (x2 - x1)*y0 + x2*y1 - y2*x1);
+            const denominator = Math.sqrt((y2 - y1)**2 + (x2 - x1)**2);
+            
+            return numerator / denominator;
+        }
+
+        // Buscar recomendações
         async function getRecommendations(accessToken, genres, savedTracks) {
             const savedArtists = new Set(
-                savedTracks.flatMap(t => t.track.artists.map(a => a.id))
+                savedTracks.flatMap(track => track.track.artists.map(artist => artist.id))
             );
             
             const recommendations = [];
@@ -165,9 +283,9 @@
             
             for(const genre of genres) {
                 let offset = 0;
-                let attempts = 0;
+                let found = false;
                 
-                while(offset < 500 && attempts < 3) {
+                while(offset < 500 && !found) {
                     const response = await fetch(
                         `https://api.spotify.com/v1/search?q=genre:${encodeURIComponent(genre[0])}&type=artist&limit=50&offset=${offset}`,
                         { headers: {'Authorization': `Bearer ${accessToken}`} }
@@ -175,7 +293,7 @@
                     const data = await response.json();
                     
                     const validArtists = data.artists.items.filter(artist => 
-                        artist.genres.includes(genre[0]) && 
+                        artist.genres.includes(genre[0]) &&
                         !savedArtists.has(artist.id) &&
                         !usedArtists.has(artist.id)
                     );
@@ -184,11 +302,10 @@
                         const randomArtist = validArtists[Math.floor(Math.random() * validArtists.length)];
                         recommendations.push(randomArtist);
                         usedArtists.add(randomArtist.id);
-                        break;
+                        found = true;
                     }
                     
                     offset += 50;
-                    attempts++;
                 }
                 
                 if(recommendations.length >= 3) break;
@@ -196,9 +313,10 @@
             return recommendations;
         }
 
+        // Exibir resultados
         function displayResults(artists) {
             const container = document.getElementById('results');
-            container.innerHTML = '<h2 style="text-align:center;margin-bottom:2rem">Artistas Recomendados</h2>';
+            container.innerHTML = '<div class="title">Artistas Recomendados</div>';
             
             artists.forEach(artist => {
                 const button = document.createElement('a');
@@ -218,8 +336,12 @@
             });
         }
 
-        // Demais funções mantidas conforme versão anterior (getAllSavedTracks, getArtistGenres, processGenres, findElbowGenres, etc.)
+        // Função auxiliar para mostrar status
+        function showStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
 
+        // Iniciar processo se autenticado
         if(window.location.hash.includes('access_token')) {
             main();
         }
