@@ -34,6 +34,7 @@
             position: relative;
             border: 2px solid #1DB954;
             width: 100%;
+            max-width: -webkit-fill-available;
             min-height: 80px;
             margin: 2rem 0;
             padding: 1rem;
@@ -266,7 +267,6 @@
                 const indexes = [];
                 
                 if(elbowIndex - offset >= 0) indexes.push(elbowIndex - offset);
-                if(elbowIndex + offset < sortedGenres.length) indexes.push(elbowIndex + offset);
                 
                 indexes.forEach(i => {
                     if(!orderedGenres.includes(sortedGenres[i])) {
@@ -274,7 +274,7 @@
                     }
                 });
                 
-                offset--;
+                offset++;
             }
             
             return orderedGenres.slice(0, 15); // Limite máximo para fallback
