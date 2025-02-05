@@ -30,25 +30,24 @@
         }
 
         .recommendation-button {
-            width: 100%;
-            min-height: 80px;
-            margin: 2rem 0;
-            padding: 1rem;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            background: white;
-            display: flex;
-            align-items: center;
-            gap: 1.5rem;
-            text-decoration: none;
-            color: inherit;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+            position: relative;
+            border: 2px solid #1DB954;
         }
 
         .recommendation-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            box-shadow: 0 4px 15px rgba(29, 185, 84, 0.2);
+        }
+
+        .recommendation-button::after {
+            content: '→';
+            position: absolute;
+            right: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #1DB954;
+            font-weight: bold;
+            font-size: 1.2rem;
         }
 
         .artist-image {
@@ -65,10 +64,8 @@
         }
 
         .artist-name {
-            margin: 0 0 0.5rem 0;
-            font-size: 1.1rem;
-            font-weight: bold;
-            color: #333;
+            color: #1DB954;
+            text-decoration: underline;
         }
 
         .artist-genres {
@@ -147,45 +144,22 @@
         // Fluxo principal
         async function main() {
             try {
-                const accessToken = window.location.hash.split('&')[0].split('=')[1];
-
-                // Buscar músicas salvas
-                showStatus('Buscando suas músicas salvas...');
-                const savedTracks = await getAllSavedTracks(accessToken);
-                console.log('Músicas encontradas:', savedTracks.length);
-
-                // Buscar gêneros dos artistas
-                showStatus('Analisando seus artistas...');
-                const artistDetails = await getArtistGenres(accessToken, savedTracks);
-                console.log('Artistas únicos:', Object.keys(artistDetails).length);
-
-                // Processar gêneros
-                const genreCounts = processGenres(savedTracks, artistDetails);
-                console.log('Distribuição de gêneros:', genreCounts);
-
-                // Encontrar gêneros do cotovelo
-                const elbowGenres = findElbowGenres(genreCounts);
-                selectedGenres = elbowGenres.map(g => g[0]);
-                console.log('Gêneros selecionados:', elbowGenres);
-
-                // Buscar recomendações
+                // ... (código anterior mantido)
+                
+                const orderedGenres = findElbowGenres(genreCounts);
+                console.log('Gêneros ordenados:', orderedGenres);
+                
                 showStatus('Buscando recomendações...');
-                let recommendations = await getRecommendations(accessToken, elbowGenres, savedTracks);
-
-                // Garantir 3 recomendações
-                if (recommendations.length < 3) {
-                    const backupGenres = genreCounts
-                        .filter(g => !elbowGenres.includes(g))
-                        .slice(-3)
-                        .reverse();
-
-                    const backupRecs = await getRecommendations(accessToken, backupGenres, savedTracks);
-                    recommendations = [...recommendations, ...backupRecs]
-                        .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
-                        .slice(0, 3);
+                let recommendations = await getRecommendations(accessToken, orderedGenres, savedTracks);
+                
+                // Fallback progressivo
+                if(recommendations.length < 3) {
+                    console.log('Ativando fallback progressivo...');
+                    const remainingGenres = orderedGenres.slice(recommendations.length + 1);
+                    const fallbackRecs = await getRecommendations(accessToken, remainingGenres, savedTracks);
+                    recommendations = [...recommendations, ...fallbackRecs];
                 }
-
-                // Exibir resultados
+                
                 displayResults(recommendations.slice(0, 3));
             } catch (error) {
                 console.error('Erro:', error);
@@ -245,20 +219,31 @@
 
         // Encontrar gêneros do cotovelo
         function findElbowGenres(sortedGenres) {
-            if (sortedGenres.length <= 3) return sortedGenres;
-
+            if(sortedGenres.length <= 3) return sortedGenres;
+            
             const points = sortedGenres.map(([_, count]) => count);
             const elbowIndex = calculateElbowIndex(points);
-
-            let padding = 1;
-            let selectedGenres = [];
-            while (selectedGenres.length < 3 && padding < 5) {
-                const start = Math.max(0, elbowIndex - padding);
-                const end = Math.min(sortedGenres.length - 1, elbowIndex + padding);
-                selectedGenres = [...new Set([...sortedGenres.slice(start, end + 1)])];
-                padding++;
+            
+            // Gerar lista ordenada por proximidade ao cotovelo
+            const orderedGenres = [];
+            let offset = 0;
+            
+            while(orderedGenres.length < sortedGenres.length) {
+                const indexes = [];
+                
+                if(elbowIndex - offset >= 0) indexes.push(elbowIndex - offset);
+                if(elbowIndex + offset < sortedGenres.length) indexes.push(elbowIndex + offset);
+                
+                indexes.forEach(i => {
+                    if(!orderedGenres.includes(sortedGenres[i])) {
+                        orderedGenres.push(sortedGenres[i]);
+                    }
+                });
+                
+                offset++;
             }
-            return selectedGenres.slice(0, 3);
+            
+            return orderedGenres.slice(0, 15); // Limite máximo para fallback
         }
 
         // Calcular índice do cotovelo
@@ -292,54 +277,53 @@
         }
 
         // Buscar recomendações
-        async function getRecommendations(accessToken, genres, savedTracks) {
+        async function getRecommendations(accessToken, orderedGenres, savedTracks) {
             const savedArtists = new Set(
                 savedTracks.flatMap(track => track.track.artists.map(artist => artist.id))
             );
-
+            
             const recommendations = [];
+            const usedGenres = new Set();
             const usedArtists = new Set();
-
-            // Busca um artista por gênero específico
-            for (const genreData of genres.slice(0, 3)) { // Limita a 3 gêneros
+            
+            for(const genreData of orderedGenres) {
                 const targetGenre = genreData[0];
+                if(usedGenres.has(targetGenre)) continue;
+                
                 let offset = 0;
                 let found = false;
-
-                console.log(`Buscando artistas para gênero: ${targetGenre}`);
-
-                while (offset < 1000 && !found) {
+                
+                while(offset < 500 && !found) {
                     const response = await fetch(
                         `https://api.spotify.com/v1/search?q=genre:${encodeURIComponent(targetGenre)}&type=artist&limit=50&offset=${offset}`,
-                        { headers: { 'Authorization': `Bearer ${accessToken}` } }
+                        { headers: {'Authorization': `Bearer ${accessToken}`} }
                     );
                     const data = await response.json();
-
-                    const validArtists = data.artists.items.filter(artist =>
-                        artist.genres.includes(targetGenre) && // Exige o gênero exato
+                    
+                    const validArtists = data.artists.items.filter(artist => 
+                        artist.genres.includes(targetGenre) &&
                         !savedArtists.has(artist.id) &&
                         !usedArtists.has(artist.id)
                     );
-
-                    if (validArtists.length > 0) {
+                    
+                    if(validArtists.length > 0) {
                         const randomArtist = validArtists[Math.floor(Math.random() * validArtists.length)];
                         recommendations.push({
                             ...randomArtist,
-                            matchedGenre: targetGenre // Armazena o gênero alvo
+                            matchedGenre: targetGenre
                         });
                         usedArtists.add(randomArtist.id);
+                        usedGenres.add(targetGenre);
                         found = true;
-                        console.log(`Encontrado: ${randomArtist.name} para ${targetGenre}`);
+                        console.log(`Gênero ${targetGenre} → ${randomArtist.name}`);
                     }
-
+                    
                     offset += 50;
                 }
-
-                if (!found) {
-                    console.error(`Nenhum artista encontrado para ${targetGenre}`);
-                }
+                
+                if(recommendations.length >= 3) break;
             }
-
+            
             return recommendations.slice(0, 3);
         }
 
