@@ -341,7 +341,7 @@
                         !usedArtists.has(artist.id)
                     );
                     
-                    if(validArtists.length > 0) {
+                    if(validArtists.length > 1) { //para dar mais variedade, pelo menos ter 2 para serem sorteados
                         const randomArtist = validArtists[Math.floor(Math.random() * validArtists.length)];
                         recommendations.push({
                             ...randomArtist,
