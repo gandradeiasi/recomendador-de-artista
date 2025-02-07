@@ -330,7 +330,7 @@
 
                 while(offset < 500 && !found) {
                 
-                    const includeQuotes = Math.random() < 0.5; //algumas vezes por as aspas trás um resultado mais preciso
+                    const includeQuotes = true; //Math.random() < 0.5; //algumas vezes por as aspas trás um resultado mais preciso
                     
                     const genreQuery = includeQuotes ? `genre:"${targetGenre}"` : `genre:${targetGenre}`;
                     
